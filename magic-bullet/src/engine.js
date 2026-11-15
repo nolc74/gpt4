@@ -34,7 +34,7 @@ export class GameEngine{
  if(Math.random()<GAME_CONFIG.relicKeyDropChance){p.keys++;this.emit("key");}
  if(Math.random()<GAME_CONFIG.gearDropChance){const id=1+Math.floor(Math.random()*1000);p.gear.push(getGear(id));this.emit("gear",p.gear[p.gear.length-1]);}
  this.burst(m.x,m.y,m.color,20);this.emit("kill",m);this.save();}
- nextWave(){const p=this.player;p.wave++;p.waveKills=0;p.waveGoal=5+p.wave*2;if(p.mode==="tower"&&(p.wave-1)%10===0){p.floor++;p.wave=1;p.waveGoal=7;this.emit("floor",p.floor);}this.emit("wave",p.wave);this.spawnGroup(Math.min(2+Math.ceil(p.wave/2),10));this.save();}
+ nextWave(){const p=this.player;p.wave++;p.waveKills=0;p.waveGoal=5+p.wave*2;if(p.mode==="tower"&&p.wave%10===0){p.floor++;this.emit("floor",p.floor);}this.emit("wave",p.wave);this.spawnGroup(Math.min(2+Math.ceil(p.wave/2),10));this.save();}
  burst(x,y,color,n=10){for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,s=35+Math.random()*140;this.particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.3+Math.random()*.35,maxLife:.65,color});}}
  updateParticles(dt){for(let i=this.particles.length-1;i>=0;i--){const p=this.particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=.96;p.vy*=.96;p.life-=dt;if(p.life<=0)this.particles.splice(i,1);}}
  spendStat(stat){if(this.player.statPoints<=0||!(stat in this.player.stats))return false;this.player.statPoints--;this.player.stats[stat]++;if(stat==="vitality"){this.player.maxHp=this.getMaxHp();this.player.hp=Math.min(this.player.maxHp,this.player.hp+18);}if(stat==="spirit"){this.player.maxMp=this.getMaxMp();this.player.mp=Math.min(this.player.maxMp,this.player.mp+15);}if(stat==="magic"||stat==="strength")this.player.attack=this.getAttack();this.save();this.emit("stat");return true;}
