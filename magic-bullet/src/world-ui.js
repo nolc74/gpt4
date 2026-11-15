@@ -1,4 +1,5 @@
-import {HABITATS, STORY_CHAPTERS, TOWER_MONSTERS} from "./world-data.js";
+import {HABITATS, STORY_CHAPTERS} from "./world-data.js";
+const css=document.createElement("link");css.rel="stylesheet";css.href="./styles-world.css";document.head.appendChild(css);
 const nav=document.querySelector(".tabs"),side=document.querySelector(".side-panel");
 if(nav&&side){
  nav.insertAdjacentHTML("beforeend",'<button class="tab" data-tab="habitats">서식지</button><button class="tab" data-tab="story">스토리</button>');
