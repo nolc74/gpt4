@@ -1,263 +1,41 @@
-import { GAME_CONFIG, INITIAL_PLAYER, MONSTERS, expRequired } from "./data.js";
-
-const clone = value => JSON.parse(JSON.stringify(value));
-
-export class GameEngine {
-  constructor(onEvent = () => {}) {
-    this.onEvent = onEvent;
-    this.player = clone(INITIAL_PLAYER);
-    this.player.expToNext = expRequired(this.player.level);
-    this.projectiles = [];
-    this.monsters = [];
-    this.particles = [];
-    this.elapsed = 0;
-    this.fireTimer = 0;
-    this.spawnTimer = 0;
-    this.paused = false;
-    this.dead = false;
-    this.width = 960;
-    this.height = 600;
-    this.position = { x: 280, y: 315 };
-    this.direction = { x: 0, y: 0 };
-    this.nextMonsterId = 1;
-    this.load();
-    this.spawnMonster("meadowHare", 3);
-  }
-
-  load() {
-    try {
-      const saved = localStorage.getItem("magic-bullet-save-v1");
-      if (!saved) return;
-      const data = JSON.parse(saved);
-      if (data?.player && Number.isFinite(data.player.level)) {
-        this.player = { ...this.player, ...data.player };
-        this.player.expToNext = expRequired(this.player.level);
-      }
-      if (data?.position && Number.isFinite(data.position.x) && Number.isFinite(data.position.y)) {
-        this.position = data.position;
-      }
-    } catch { /* Ignore corrupt local saves and start fresh. */ }
-  }
-
-  save() {
-    try {
-      localStorage.setItem("magic-bullet-save-v1", JSON.stringify({
-        player: this.player,
-        position: this.position
-      }));
-    } catch { /* Storage may be unavailable in private browsing. */ }
-  }
-
-  setWorldSize(width, height) {
-    this.width = width;
-    this.height = height;
-    this.position.x = Math.max(28, Math.min(width - 28, this.position.x));
-    this.position.y = Math.max(90, Math.min(height - 28, this.position.y));
-  }
-
-  setMovement(x, y) {
-    const length = Math.hypot(x, y);
-    if (length > 1) { x /= length; y /= length; }
-    this.direction = { x, y };
-  }
-
-  spawnMonster(type = "meadowHare", count = 1) {
-    const template = MONSTERS[type] ?? MONSTERS.meadowHare;
-    for (let i = 0; i < count; i++) {
-      if (this.monsters.length >= GAME_CONFIG.monsterSpawnLimit) return;
-      const side = Math.random() < 0.5 ? -1 : 1;
-      const x = side < 0 ? 45 : this.width - 45;
-      const y = 120 + Math.random() * Math.max(80, this.height - 170);
-      this.monsters.push({
-        ...template,
-        instanceId: this.nextMonsterId++,
-        x, y,
-        currentHp: template.hp,
-        hitFlash: 0,
-        phase: Math.random() * Math.PI * 2
-      });
-    }
-  }
-
-  nearestMonster() {
-    let target = null;
-    let bestDistance = Infinity;
-    for (const monster of this.monsters) {
-      const distance = Math.hypot(monster.x - this.position.x, monster.y - this.position.y);
-      if (distance < bestDistance) { bestDistance = distance; target = monster; }
-    }
-    return target;
-  }
-
-  update(delta) {
-    if (this.paused || this.dead) return;
-    const dt = Math.min(delta, 0.04);
-    this.elapsed += dt;
-    const p = this.position;
-    p.x += this.direction.x * GAME_CONFIG.playerMoveSpeed * dt;
-    p.y += this.direction.y * GAME_CONFIG.playerMoveSpeed * dt;
-    p.x = Math.max(26, Math.min(this.width - 26, p.x));
-    p.y = Math.max(95, Math.min(this.height - 25, p.y));
-
-    this.fireTimer -= dt;
-    const target = this.nearestMonster();
-    if (target && this.fireTimer <= 0) {
-      const angle = Math.atan2(target.y - p.y, target.x - p.x);
-      this.projectiles.push({
-        x: p.x + Math.cos(angle) * 22,
-        y: p.y + Math.sin(angle) * 22,
-        vx: Math.cos(angle) * GAME_CONFIG.projectileSpeed,
-        vy: Math.sin(angle) * GAME_CONFIG.projectileSpeed,
-        life: 1.8,
-        damage: this.player.attack
-      });
-      this.fireTimer = 1 / this.player.attackSpeed;
-      this.emit("fire");
-    }
-
-    this.updateProjectiles(dt);
-    this.updateMonsters(dt);
-    this.updateParticles(dt);
-
-    this.spawnTimer += dt;
-    if (this.spawnTimer > 2.5 && this.monsters.length < 3) {
-      this.spawnMonster(this.elapsed > 35 ? "manaSlime" : "meadowHare");
-      this.spawnTimer = 0;
-    }
-  }
-
-  updateProjectiles(dt) {
-    for (let i = this.projectiles.length - 1; i >= 0; i--) {
-      const shot = this.projectiles[i];
-      shot.x += shot.vx * dt;
-      shot.y += shot.vy * dt;
-      shot.life -= dt;
-      let hit = false;
-      for (const monster of this.monsters) {
-        if (Math.hypot(shot.x - monster.x, shot.y - monster.y) <= monster.radius + GAME_CONFIG.projectileRadius) {
-          const damage = Math.max(1, shot.damage - monster.defense);
-          monster.currentHp -= damage;
-          monster.hitFlash = 0.12;
-          this.addBurst(shot.x, shot.y, "#9beaff", 8);
-          hit = true;
-          if (monster.currentHp <= 0) this.defeatMonster(monster);
-          break;
-        }
-      }
-      if (hit || shot.life <= 0 || shot.x < -20 || shot.x > this.width + 20 || shot.y < -20 || shot.y > this.height + 20) {
-        this.projectiles.splice(i, 1);
-      }
-    }
-  }
-
-  updateMonsters(dt) {
-    for (const monster of [...this.monsters]) {
-      const dx = this.position.x - monster.x;
-      const dy = this.position.y - monster.y;
-      const distance = Math.hypot(dx, dy) || 1;
-      monster.phase += dt * 3;
-      monster.hitFlash = Math.max(0, monster.hitFlash - dt);
-      if (distance > monster.radius + 17) {
-        monster.x += dx / distance * monster.speed * dt;
-        monster.y += dy / distance * monster.speed * dt;
-      } else {
-        this.player.hp = Math.max(0, this.player.hp - monster.attack * dt);
-        if (this.player.hp <= 0) {
-          this.dead = true;
-          this.emit("dead");
-          this.save();
-        }
-      }
-    }
-  }
-
-  defeatMonster(monster) {
-    const index = this.monsters.findIndex(item => item.instanceId === monster.instanceId);
-    if (index < 0) return;
-    this.monsters.splice(index, 1);
-    this.player.kills++;
-    this.player.gold += monster.gold;
-    this.gainExp(monster.exp);
-    this.addBurst(monster.x, monster.y, monster.color, 20);
-    if (Math.random() < GAME_CONFIG.relicKeyDropChance) {
-      this.player.relicKeys++;
-      this.emit("key");
-    }
-    this.emit("kill", monster);
-    this.save();
-  }
-
-  gainExp(amount) {
-    this.player.exp += amount;
-    while (this.player.exp >= this.player.expToNext) {
-      this.player.exp -= this.player.expToNext;
-      this.player.level++;
-      this.player.expToNext = expRequired(this.player.level);
-      this.player.maxHp += 50;
-      this.player.hp = Math.min(this.player.maxHp, this.player.hp + 50);
-      this.player.maxMp += 25;
-      this.player.mp = Math.min(this.player.maxMp, this.player.mp + 25);
-      this.emit("level");
-    }
-  }
-
-  addBurst(x, y, color, count = 10) {
-    for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 35 + Math.random() * 130;
-      this.particles.push({
-        x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
-        life: 0.25 + Math.random() * 0.4, maxLife: 0.65, color
-      });
-    }
-  }
-
-  updateParticles(dt) {
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const particle = this.particles[i];
-      particle.x += particle.vx * dt;
-      particle.y += particle.vy * dt;
-      particle.vx *= 0.96;
-      particle.vy *= 0.96;
-      particle.life -= dt;
-      if (particle.life <= 0) this.particles.splice(i, 1);
-    }
-  }
-
-  upgrade(stat) {
-    const cost = 50;
-    if (this.player.gold < cost) { this.emit("not-enough-gold"); return false; }
-    this.player.gold -= cost;
-    if (stat === "attack") this.player.attack += 2;
-    if (stat === "hp") {
-      this.player.maxHp += 20;
-      this.player.hp += 20;
-    }
-    if (stat === "mp") {
-      this.player.maxMp += 10;
-      this.player.mp += 10;
-    }
-    this.save();
-    this.emit("upgrade");
-    return true;
-  }
-
-  togglePause() {
-    if (this.dead) return;
-    this.paused = !this.paused;
-    this.emit("pause", this.paused);
-  }
-
-  retry() {
-    this.dead = false;
-    this.player.hp = this.player.maxHp;
-    this.position = { x: this.width * 0.29, y: this.height * 0.53 };
-    this.projectiles = [];
-    this.monsters = [];
-    this.spawnMonster("meadowHare", 3);
-    this.save();
-    this.emit("retry");
-  }
-
-  emit(type, detail) { this.onEvent(type, detail); }
+import {GAME_CONFIG,MONSTERS,expRequired,getRelic,getGear,getStaff} from "./data.js";
+const copy=o=>JSON.parse(JSON.stringify(o));
+export class GameEngine{
+ constructor(onEvent=()=>{}){
+  this.onEvent=onEvent;this.player={level:1,exp:0,expToNext:90,gold:0,hp:120,maxHp:120,mp:60,maxMp:60,attack:12,attackSpeed:1.8,defense:0,statPoints:0,stats:{vitality:1,magic:1,strength:1,agility:1,sense:1,spirit:1},kills:0,keys:0,relics:[],gear:[],staffs:[1],equippedStaff:1,equippedGear:{},floor:1,wave:1,waveKills:0,waveGoal:5};
+  this.position={x:280,y:315};this.direction={x:0,y:0};this.projectiles=[];this.monsters=[];this.particles=[];this.elapsed=0;this.fireTimer=0;this.spawnTimer=0;this.paused=false;this.dead=false;this.width=960;this.height=600;this.nextId=1;this.load();this.spawnGroup(3);
+ }
+ load(){try{const d=JSON.parse(localStorage.getItem("magic-bullet-save-v2")||"null");if(d?.player)this.player={...this.player,...d.player,stats:{...this.player.stats,...d.player.stats}};if(d?.position)this.position=d.position;this.player.expToNext=expRequired(this.player.level);}catch{}}
+ save(){try{localStorage.setItem("magic-bullet-save-v2",JSON.stringify({player:this.player,position:this.position}));}catch{}}
+ emit(t,d){this.onEvent(t,d);}
+ setWorldSize(w,h){this.width=w;this.height=h;this.position.x=Math.max(30,Math.min(w-30,this.position.x));this.position.y=Math.max(100,Math.min(h-30,this.position.y));}
+ setMovement(x,y){const l=Math.hypot(x,y);if(l>1){x/=l;y/=l;}this.direction={x,y};}
+ getBonuses(){let attack=0,hp=0,def=0,speed=0;for(const g of Object.values(this.player.equippedGear)){attack+=g.attack;hp+=g.hp;def+=g.defense;}for(const id of this.player.relics){const r=getRelic(id.id);const lv=r.levels[Math.max(0,id.level-1)];attack+=lv.attack;hp+=lv.hp; }const s=getStaff(this.player.equippedStaff);return{attack,hp,def,speed,staff:s};}
+ getMaxHp(){return 120+this.player.stats.vitality*18+this.getBonuses().hp;}
+ getAttack(){return Math.floor(10+this.player.stats.magic*2+this.player.stats.strength+this.getBonuses().attack+this.getBonuses().staff.attack);}
+ spawnGroup(count){for(let i=0;i<count&&this.monsters.length<GAME_CONFIG.spawnLimit;i++){const floor=this.player.floor,wave=this.player.wave;let template=MONSTERS[Math.min(3,Math.floor((wave-1)/4))];const boss=wave%10===0&&i===0;if(boss)template=MONSTERS[4];const scale=1+(floor-1)*.65+(wave-1)*.16;const side=Math.random()<.5?-1:1;this.monsters.push({...template,instanceId:this.nextId++,x:side<0?45:this.width-45,y:115+Math.random()*Math.max(80,this.height-175),hp:Math.ceil(template.hp*scale),currentHp:Math.ceil(template.hp*scale),attack:template.attack*scale,defense:template.defense+Math.floor(wave/8),phase:Math.random()*6,hitFlash:0,boss});}}
+ nearest(){let t=null,d=Infinity;for(const m of this.monsters){const n=Math.hypot(m.x-this.position.x,m.y-this.position.y);if(n<d){d=n;t=m;}}return t;}
+ update(delta){if(this.paused||this.dead)return;const dt=Math.min(delta,.04);this.elapsed+=dt;const p=this.position;p.x=Math.max(26,Math.min(this.width-26,p.x+this.direction.x*GAME_CONFIG.playerSpeed*dt));p.y=Math.max(100,Math.min(this.height-25,p.y+this.direction.y*GAME_CONFIG.playerSpeed*dt));
+ this.fireTimer-=dt;const target=this.nearest();if(target&&this.fireTimer<=0){const a=Math.atan2(target.y-p.y,target.x-p.x);this.projectiles.push({x:p.x+Math.cos(a)*20,y:p.y+Math.sin(a)*20,vx:Math.cos(a)*GAME_CONFIG.projectileSpeed,vy:Math.sin(a)*GAME_CONFIG.projectileSpeed,life:1.8,damage:this.getAttack()});this.fireTimer=1/Math.max(.5,this.player.attackSpeed+this.getBonuses().staff.attackSpeed);this.emit("fire");}
+ this.updateShots(dt);this.updateMonsters(dt);this.updateParticles(dt);
+ this.spawnTimer+=dt;if(this.spawnTimer>1.7&&this.monsters.length<Math.min(8,2+Math.ceil(this.player.wave/2))&&this.player.waveKills<this.player.waveGoal){this.spawnGroup(1);this.spawnTimer=0;}
+ if(this.player.waveKills>=this.player.waveGoal&&this.monsters.length===0)this.nextWave();
+ }
+ updateShots(dt){for(let i=this.projectiles.length-1;i>=0;i--){const s=this.projectiles[i];s.x+=s.vx*dt;s.y+=s.vy*dt;s.life-=dt;let hit=false;for(const m of this.monsters){if(Math.hypot(s.x-m.x,s.y-m.y)<m.radius+8){m.currentHp-=Math.max(1,s.damage-m.defense);m.hitFlash=.12;this.burst(s.x,s.y,"#a9f3ff",7);hit=true;if(m.currentHp<=0)this.kill(m);break;}}if(hit||s.life<=0||s.x<0||s.x>this.width||s.y<0||s.y>this.height)this.projectiles.splice(i,1);}}
+ updateMonsters(dt){for(const m of [...this.monsters]){const dx=this.position.x-m.x,dy=this.position.y-m.y,d=Math.hypot(dx,dy)||1;m.phase+=dt*3;m.hitFlash=Math.max(0,m.hitFlash-dt);if(d>m.radius+17){m.x+=dx/d*m.speed*dt;m.y+=dy/d*m.speed*dt;}else{this.player.hp=Math.max(0,this.player.hp-Math.max(1,m.attack-this.player.defense-this.getBonuses().def)*dt);if(this.player.hp<=0){this.dead=true;this.emit("dead");this.save();}}}}
+ kill(m){const i=this.monsters.findIndex(x=>x.instanceId===m.instanceId);if(i<0)return;this.monsters.splice(i,1);const p=this.player;p.kills++;p.waveKills++;p.gold+=m.gold;p.exp+=m.exp;while(p.exp>=p.expToNext){p.exp-=p.expToNext;p.level++;p.statPoints+=3;p.expToNext=expRequired(p.level);p.maxHp=this.getMaxHp();p.hp=Math.min(p.maxHp,p.hp+35);p.maxMp+=15;p.mp=p.maxMp;this.emit("level");}
+ if(Math.random()<GAME_CONFIG.relicKeyDropChance){p.keys++;this.emit("key");}
+ if(Math.random()<GAME_CONFIG.gearDropChance){const id=1+Math.floor(Math.random()*1000);p.gear.push(getGear(id));this.emit("gear",p.gear[p.gear.length-1]);}
+ this.burst(m.x,m.y,m.color,20);this.emit("kill",m);this.save();}
+ nextWave(){const p=this.player;p.wave++;p.waveKills=0;p.waveGoal=5+p.wave*2;if((p.wave-1)%10===0){p.floor++;p.wave=1;p.waveGoal=7;this.emit("floor",p.floor);}this.emit("wave",p.wave);this.spawnGroup(Math.min(2+Math.ceil(p.wave/2),10));this.save();}
+ burst(x,y,color,n=10){for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,s=35+Math.random()*140;this.particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.3+Math.random()*.35,maxLife:.65,color});}}
+ updateParticles(dt){for(let i=this.particles.length-1;i>=0;i--){const p=this.particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=.96;p.vy*=.96;p.life-=dt;if(p.life<=0)this.particles.splice(i,1);}}
+ spendStat(stat){if(this.player.statPoints<=0||!(stat in this.player.stats))return false;this.player.statPoints--;this.player.stats[stat]++;if(stat==="vitality"){this.player.maxHp=this.getMaxHp();this.player.hp+=18;}if(stat==="magic"||stat==="strength")this.player.attack=this.getAttack();this.save();this.emit("stat");return true;}
+ upgrade(stat){const costs={attack:80,hp:80,mp:80};if(this.player.gold<costs[stat]){this.emit("not-enough-gold");return false;}this.player.gold-=costs[stat];if(stat==="attack")this.player.stats.magic+=1;if(stat==="hp"){this.player.stats.vitality+=1;this.player.maxHp=this.getMaxHp();this.player.hp+=18;}if(stat==="mp"){this.player.maxMp+=20;this.player.mp+=20;}this.save();this.emit("upgrade");return true;}
+ openChest(){if(this.player.keys<=0){this.emit("no-key");return;}this.player.keys--;const id=1+Math.floor(Math.random()*3001),found=this.player.relics.find(r=>r.id===id);if(found)found.level=Math.min(50,found.level+1);else this.player.relics.push({id,level:1});const relic=getRelic(id);this.emit("relic",relic);this.save();}
+ equipGear(index){const g=this.player.gear[index];if(!g)return;this.player.equippedGear[g.slot]=g;this.player.gear.splice(index,1);this.player.maxHp=this.getMaxHp();this.player.hp=Math.min(this.player.hp,this.player.maxHp);this.save();this.emit("equipment");}
+ buyStaff(id){const s=getStaff(id);if(this.player.staffs.includes(id)){this.player.equippedStaff=id;this.emit("staff");return;}if(this.player.gold<s.cost){this.emit("not-enough-gold");return;}this.player.gold-=s.cost;this.player.staffs.push(id);this.player.equippedStaff=id;this.save();this.emit("staff");}
+ enhanceStaff(){const s=getStaff(this.player.equippedStaff),cost=s.level*120;if(this.player.gold<cost){this.emit("not-enough-gold");return;}this.player.gold-=cost;s.level++;this.player.attack+=Math.ceil(s.attack*.12);this.save();this.emit("staff");}
+ pause(){this.paused=!this.paused;this.emit("pause",this.paused);}
+ retry(){this.dead=false;this.player.hp=this.player.maxHp;this.position={x:this.width*.29,y:this.height*.53};this.monsters=[];this.projectiles=[];this.player.waveKills=0;this.spawnGroup(3);this.save();this.emit("retry");}
 }
