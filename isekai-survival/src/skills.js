@@ -1,0 +1,3 @@
+export const skillBook={basic_attack:{id:"basic_attack",name:"기초 공격",icon:"⚔️",description:"기본 공격이 강해집니다.",level:1,xp:0,next:5},movement:{id:"movement",name:"기초 보법",icon:"👣",description:"이동에 익숙해집니다.",level:0,xp:0,next:8},mana_sense:{id:"mana_sense",name:"마력 감지",icon:"✧",description:"마나의 흐름을 감지합니다.",level:0,xp:0,next:5}};
+export function learn(id,name,icon,description){let s=skillBook[id];if(!s){s=skillBook[id]={id,name,icon,description,level:1,xp:0,next:5};return {skill:s,newSkill:true,levels:0};}s.xp++;let levels=0;while(s.xp>=s.next){s.xp-=s.next;s.level++;s.next=Math.ceil(s.next*1.55);levels++;}return {skill:s,newSkill:false,levels};}
+export function learned(){return Object.values(skillBook).filter(s=>s.level>0);}
