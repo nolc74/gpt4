@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#17251e"><title>이세계 생존기</title><link rel="stylesheet" href="./styles.css"></head>
+<body><main class="app"><header><div><small>ANOTHER WORLD</small><h1>이세계 생존기</h1></div><div class="topstats">❤ <b id="hp">100</b>　✦ <b id="mana">30</b>　Lv. <b id="level">1</b></div></header>
+<section class="game"><canvas id="game" width="960" height="600"></canvas><div id="toast" class="toast">숲을 탐험하고 새로운 기술을 익혀 보세요.</div></section>
+<section class="hud"><article class="panel"><b>모험가 정보</b><p>경험치 <strong id="xp">0 / 20</strong></p><p>공격력 <strong id="attack">5</strong></p><p>보유 스킬 <strong id="skill-count">1</strong></p><div class="track"><i id="xpbar"></i></div></article><article class="panel"><b>습득한 스킬</b><div id="skills"></div><small>같은 행동을 반복하면 관련 스킬이 성장합니다.</small></article><article class="panel help"><b>조작 방법</b><p>PC: WASD / 방향키 이동, Space 공격</p><p>태블릿: 조이스틱 이동, 공격 버튼 터치</p><p>초록 슬라임을 처치해 경험치와 마나를 얻으세요.</p></article></section>
+<section class="touch"><div id="stick" class="stick"><i id="knob"></i></div><button id="hit">공격</button></section><footer>프로토타입 0.1 · 스킬 조합과 저장 기능은 다음 단계에서 확장됩니다.</footer></main><script type="module" src="./src/main.js"></script></body></html>
